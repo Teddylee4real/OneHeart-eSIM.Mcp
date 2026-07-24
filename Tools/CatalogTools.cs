@@ -7,6 +7,27 @@ using OneHeart_eSIM.Mcp.Services;
 
 namespace OneHeart_eSIM.Mcp.Tools;
 
+// 列舉成員名稱直接用中文，是因為要跟資料庫實際儲存、search_esim_plans內部拿去比對
+// Category欄位的字串值（"總量型"/"每日定量型"）完全一致，省去多一層中英對照表、
+// 也讓LLM在tools/list看到的JSON Schema enum值就是它應該原樣傳回來的值。
+public enum EsimPlanType
+{
+    [Description("總量型：總流量用完為止，適合天數較長、用量抓得準的旅程")]
+    總量型,
+    [Description("每日定量型：每天固定配額，用完當日降速、隔日恢復，適合天數抓不準或想確保不斷網的旅程")]
+    每日定量型
+}
+
+public enum EsimUsageLevel
+{
+    [Description("輕度：偶爾收信、看地圖、傳訊息")]
+    light,
+    [Description("中度：一般瀏覽網頁、社群媒體、地圖導航（預設）")]
+    medium,
+    [Description("重度：追劇、直播、開熱點分享給其他裝置")]
+    heavy
+}
+
 [McpServerToolType]
 public sealed class CatalogTools
 {
@@ -24,8 +45,13 @@ public sealed class CatalogTools
         _catalog = catalog;
     }
 
-    [McpServerTool, Description("列出一心eSIM目前有販售方案的所有國家/地區（英文與中文名稱對照）。查詢方案前可先呼叫這個工具確認國家名稱怎麼寫。")]
-    public async Task<string> ListCountries()
+    [McpServerTool, Description("""
+        列出一心eSIM目前販售方案覆蓋的所有國家/地區（英文與中文名稱對照，含各國方案數量）。
+        適用情境：使用者問「你們支援哪些國家」「有賣OO地區的eSIM嗎」；或你準備呼叫
+        search_esim_plans/recommend_esim_plan，但不確定某國家在系統裡該用什麼名稱表示時，
+        先呼叫這個工具確認，比用猜的準確。
+        """)]
+    public async Task<string> ListEsimCountries()
     {
         var plans = await _catalog.GetPlansAsync();
 
@@ -45,11 +71,17 @@ public sealed class CatalogTools
         return JsonSerializer.Serialize(new { count = countries.Count, countries }, JsonOptions);
     }
 
-    [McpServerTool, Description("依國家/方案類型/關鍵字搜尋一心eSIM方案清單。country可用英文或中文（例如\"Japan\"或\"日本\"皆可，模糊比對）。planType可填\"總量型\"（總流量用完為止）或\"每日定量型\"（每天固定流量）。keyword可比對商品名稱、描述、規格文字。三個參數都可留空，留空時回傳全部方案（依價格排序並截斷筆數）。")]
-    public async Task<string> SearchPlans(
-        [Description("國家名稱，英文或中文皆可，模糊比對，例如 Japan、日本、韓國")] string? country = null,
-        [Description("方案類型：總量型 或 每日定量型")] string? planType = null,
-        [Description("自由關鍵字，比對商品名稱/描述/規格")] string? keyword = null,
+    [McpServerTool, Description("""
+        依國家、方案類型、關鍵字搜尋一心eSIM的商品清單，一次回傳多筆結果讓使用者自己比較。
+        適用情境：使用者想瀏覽/比較某國家的多個方案，或已經明確講出要哪種類型
+        （例如指定「總量型」或「每日定量型」）。
+        如果使用者是描述旅遊情境（去哪個國家玩幾天、上網習慣如何）要你直接建議選哪個，
+        改用recommend_esim_plan讓它幫忙評分挑選，不要自己從這個工具的結果裡用猜的。
+        """)]
+    public async Task<string> SearchEsimPlans(
+        [Description("國家名稱，英文或中文皆可，模糊比對，例如 Japan、日本、韓國。不確定系統裡的正確名稱時，先呼叫list_esim_countries確認")] string? country = null,
+        [Description("方案類型，留空代表不限類型")] EsimPlanType? planType = null,
+        [Description("自由關鍵字，比對商品名稱/描述/規格文字")] string? keyword = null,
         [Description("最多回傳幾筆，預設20，避免結果過多")] int limit = 20)
     {
         var plans = await _catalog.GetPlansAsync();
@@ -63,9 +95,10 @@ public sealed class CatalogTools
                 p.ProductEngName.Contains(country, StringComparison.OrdinalIgnoreCase));
         }
 
-        if (!string.IsNullOrWhiteSpace(planType))
+        if (planType.HasValue)
         {
-            query = query.Where(p => p.Category.Contains(planType, StringComparison.OrdinalIgnoreCase));
+            var planTypeText = planType.Value.ToString();
+            query = query.Where(p => p.Category.Contains(planTypeText, StringComparison.OrdinalIgnoreCase));
         }
 
         if (!string.IsNullOrWhiteSpace(keyword))
@@ -85,9 +118,13 @@ public sealed class CatalogTools
         return JsonSerializer.Serialize(new { count = results.Count, totalMatched = matched.Count, items = results }, JsonOptions);
     }
 
-    [McpServerTool, Description("取得單一方案的完整詳情，包含商品說明、各規格庫存、購買連結。需要先從search_plans或recommend_plan取得productId。")]
-    public async Task<string> GetPlanDetail(
-        [Description("方案的productId（GUID字串），從search_plans或recommend_plan的結果取得")] string productId)
+    [McpServerTool, Description("""
+        取得單一方案的完整詳情，包含商品說明（安裝/啟用步驟等）、各規格庫存、購買連結。
+        適用情境：使用者對某個已知方案想進一步了解安裝方式、使用細節、或確認庫存時。
+        需要先從search_esim_plans或recommend_esim_plan的結果取得productId，不要自己編造。
+        """)]
+    public async Task<string> GetEsimPlanDetail(
+        [Description("方案的productId（GUID字串），從search_esim_plans或recommend_esim_plan的結果取得")] string productId)
     {
         if (!Guid.TryParse(productId, out var id))
         {
@@ -98,11 +135,17 @@ public sealed class CatalogTools
         return JsonSerializer.Serialize(detail, JsonOptions);
     }
 
-    [McpServerTool, Description("依旅遊天數與上網用量習慣，推薦最合適的1-3個eSIM方案，並附上購買連結。這是幫使用者「選方案」最好用的工具，優先使用這個而不是自己從search_plans結果裡猜。")]
-    public async Task<string> RecommendPlan(
-        [Description("目的地國家，英文或中文皆可，例如 Japan、日本")] string country,
+    [McpServerTool, Description("""
+        依旅遊天數與上網用量習慣，推薦最合適的1-3個eSIM方案，並附上購買連結，
+        是「幫使用者選方案」最好用的工具。
+        適用情境：使用者詢問出國上網卡、各國eSIM方案、即時發卡服務，並描述了
+        「要去OO玩幾天」「想找適合的上網方案/漫遊卡」「幫我推薦/挑選eSIM」時優先使用這個，
+        而不是自己呼叫search_esim_plans後用猜的。
+        """)]
+    public async Task<string> RecommendEsimPlan(
+        [Description("目的地國家，英文或中文皆可，例如 Japan、日本。不確定系統裡的正確名稱時，先呼叫list_esim_countries確認")] string country,
         [Description("預計使用天數")] int days,
-        [Description("用量習慣：light(輕度，偶爾收信/地圖)、medium(中度，一般瀏覽/社群，預設)、heavy(重度，追劇/熱點分享)")] string usageLevel = "medium")
+        [Description("用量習慣，留空預設為medium（中度）")] EsimUsageLevel usageLevel = EsimUsageLevel.medium)
     {
         var plans = await _catalog.GetPlansAsync();
 
@@ -115,13 +158,13 @@ public sealed class CatalogTools
 
         if (candidates.Count == 0)
         {
-            return JsonSerializer.Serialize(new { ok = false, error = $"找不到「{country}」的方案，建議先呼叫list_countries確認國家名稱" }, JsonOptions);
+            return JsonSerializer.Serialize(new { ok = false, error = $"找不到「{country}」的方案，建議先呼叫list_esim_countries確認國家名稱" }, JsonOptions);
         }
 
-        double gbPerDay = usageLevel.Trim().ToLowerInvariant() switch
+        double gbPerDay = usageLevel switch
         {
-            "light" or "輕度" or "低" => 0.5,
-            "heavy" or "重度" or "高" => 2.5,
+            EsimUsageLevel.light => 0.5,
+            EsimUsageLevel.heavy => 2.5,
             _ => 1.0
         };
         double estimatedNeedGb = gbPerDay * Math.Max(days, 1);
