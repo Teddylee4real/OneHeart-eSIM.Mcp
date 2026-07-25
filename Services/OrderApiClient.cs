@@ -19,7 +19,7 @@ public class OrderApiClient
     }
 
     public async Task<CreateOrderResponse> CreateOrderAsync(
-        Guid productId, string spec, int quantity, string email, string? phone, string? userName, CancellationToken ct = default)
+        Guid productId, string spec, int quantity, string email, string? phone, string userName, string paymentMethod, CancellationToken ct = default)
     {
         var form = new Dictionary<string, string>
         {
@@ -29,7 +29,8 @@ public class OrderApiClient
             ["quantity"] = quantity.ToString(),
             ["email"] = email,
             ["phone"] = phone ?? "",
-            ["userName"] = userName ?? ""
+            ["userName"] = userName,
+            ["paymentMethod"] = paymentMethod
         };
 
         var resp = await _http.PostAsync("/OrderApi/CreateOrder", new FormUrlEncodedContent(form), ct);
