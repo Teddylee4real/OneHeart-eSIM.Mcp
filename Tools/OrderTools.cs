@@ -9,7 +9,7 @@ public enum EsimPaymentMethod
 {
     [Description("LinePay：回傳的付款連結一開就是LinePay收銀台")]
     LinePay,
-    [Description("ECPay綠界：回傳的付款連結會自動導向綠界收銀台，可選信用卡／ATM轉帳／超商代碼等付款方式")]
+    [Description("綠界 (信用卡付款/ATM轉帳/超商條碼)：回傳的付款連結會自動導向綠界收銀台")]
     ECPay
 }
 
@@ -49,7 +49,7 @@ public sealed class OrderTools
         [Description("購買數量，需與使用者確認過的數字一致")] int quantity,
         [Description("使用者的email，必填，訂單憑證與eSIM會寄到這裡")] string email,
         [Description("使用者的稱呼/姓名，必填，訂單聯絡資料需要，不可留空")] string userName,
-        [Description("付款方式，留空預設LinePay")] EsimPaymentMethod paymentMethod = EsimPaymentMethod.LinePay,
+        [Description("付款方式：LinePay，或綠界 (信用卡付款/ATM轉帳/超商條碼)。留空預設LinePay")] EsimPaymentMethod paymentMethod = EsimPaymentMethod.LinePay,
         [Description("使用者的手機號碼，選填")] string? phone = null)
     {
         if (!Guid.TryParse(productId, out var id))
