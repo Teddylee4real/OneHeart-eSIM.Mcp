@@ -51,6 +51,16 @@ builder.Services.AddMcpServer(options =>
 
 var app = builder.Build();
 
+// MCP Registry（官方modelcontextprotocol.io伺服器登記處）網域所有權驗證用，
+// 官方client會直接GET這個固定路徑取得公鑰proof record。原本想放在主站
+// oneheartesim.com，但那邊是舊版System.Web/IIS，對「開頭有點的資料夾+完全
+// 沒副檔名的檔名」這個組合的副檔名判斷有個踩不完的坑（404.17，IIS誤判成該丟給
+// StaticFileModule處理），改放這裡的ASP.NET Core minimal routing反而完全沒問題。
+// 代價是拿去驗證網域所有權的因此是mcp.oneheartesim.com而不是oneheartesim.com，
+// 命名空間會是com.oneheartesim.mcp/*而不是更簡短的com.oneheartesim/*。
+app.MapGet("/.well-known/mcp-registry-auth", () =>
+    Results.Text("v=MCPv1; k=ed25519; p=vNedMvEGEjtb3ngFcnmkQh5/PeTPTwTOYunx/tk7kMQ=", "text/plain"));
+
 app.MapMcp();
 
 app.Run();
