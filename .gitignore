@@ -4,3 +4,4 @@ obj/
 .vs/
 publish/
 appsettings.Production.json
+mcp-publisher.exe
